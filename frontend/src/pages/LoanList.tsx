@@ -4,12 +4,14 @@ import type { Loan } from "../types";
 import { Link } from "react-router-dom";
 import { formatCurrency, cn } from "../utils";
 import dayjs from "dayjs";
+import { TableSkeleton } from "../components/ui/TableSkeleton";
 
 export default function LoanList() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<keyof Loan | "endDate">("endDate");
   const [sortAsc, setSortAsc] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<"ALL" | "ACTIVE" | "CLOSED">(
     "ALL"
   );
@@ -19,11 +21,14 @@ export default function LoanList() {
   }, []);
 
   const loadLoans = async () => {
+    setLoading(true);
     try {
       const data = await api.getLoans();
       setLoans(data);
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -47,6 +52,18 @@ export default function LoanList() {
       loadLoans();
     }
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+          <h1 className="text-3xl font-bold text-slate-800">My Loans</h1>
+          <div className="h-10 w-32 bg-slate-200 animate-pulse rounded-lg"></div>
+        </div>
+        <TableSkeleton rows={5} columns={9} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

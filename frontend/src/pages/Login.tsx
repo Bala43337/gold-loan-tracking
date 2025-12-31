@@ -2,30 +2,36 @@ import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
+import goldBg from "../assets/gold_bg.png";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError("");
     try {
       const response = await api.login(email, password);
       login(response.access_token, email);
       navigate("/");
     } catch (err) {
       setError("Invalid credentials");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4 bg-cover bg-center"
-      style={{ backgroundImage: "url('/gold_bg.png')" }}
+      style={{ backgroundImage: `url(${goldBg})` }}
     >
       {/* Overlay for better readability */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
@@ -112,9 +118,40 @@ export default function Login() {
           </div>
           <button
             type="submit"
-            className="w-full py-3.5 bg-yellow-500 text-white font-bold rounded-lg hover:bg-yellow-600 transition-colors shadow-md hover:shadow-lg transform active:scale-[0.98] duration-200 mt-2"
+            disabled={isLoading}
+            className={`w-full py-3.5 text-white font-bold rounded-lg shadow-md transition-all duration-200 mt-2 ${
+              isLoading
+                ? "bg-yellow-400 cursor-not-allowed opacity-70"
+                : "bg-yellow-500 hover:bg-yellow-600 hover:shadow-lg transform active:scale-[0.98]"
+            }`}
           >
-            Sign In
+            {isLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg
+                  className="animate-spin h-5 w-5 text-white"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                Signing In...
+              </span>
+            ) : (
+              "Sign In"
+            )}
           </button>
         </form>
       </div>

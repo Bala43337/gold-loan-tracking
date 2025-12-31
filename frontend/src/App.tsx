@@ -8,12 +8,33 @@ import Simulation from "./pages/Simulation";
 import Login from "./pages/Login";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 
+import { Skeleton } from "./components/ui/Skeleton";
+
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
-    return <div>Loading...</div>; // Or a better loading spinner
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+        <div className="hidden md:block w-64 p-4 bg-slate-900 border-r border-slate-800">
+          <Skeleton className="h-8 w-32 mb-8 bg-slate-800" />
+          <div className="space-y-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-10 w-full bg-slate-800" />
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 p-8">
+          <Skeleton className="h-32 w-full mb-8" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-40 w-full" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
