@@ -1,7 +1,7 @@
 import axios from "axios";
 import type { Loan, AppSettings, CreateLoanDto } from "../types";
 
-const API_URL = "http://localhost:1234"; // Assuming backend runs on 3000
+const API_URL = "https://gold-loan-tracking.onrender.com"; // Assuming backend runs on 3000
 
 const axiosInstance = axios.create({
   baseURL: API_URL,
