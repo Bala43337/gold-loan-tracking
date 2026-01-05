@@ -3,12 +3,12 @@ import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 import goldBg from "../assets/gold_bg.png";
+import { toast } from "react-hot-toast";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -16,13 +16,14 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setError("");
     try {
       const response = await api.login(email, password);
       login(response.access_token, email);
+      toast.success("Login successful");
       navigate("/");
-    } catch (err) {
-      setError("Invalid credentials");
+    } catch (err: any) {
+      const msg = err.response?.data?.message || "Invalid credentials";
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -40,11 +41,6 @@ export default function Login() {
         <h1 className="text-3xl font-extrabold text-slate-900 mb-6 text-center tracking-tight">
           <span className="text-yellow-600">Gold</span> Tracking
         </h1>
-        {error && (
-          <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm font-medium border border-red-100">
-            {error}
-          </div>
-        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">

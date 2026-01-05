@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { LoansService } from '../loans/loans.service';
-import { SimulateLoanClosureDto } from './dto/simulate-loan-closure.dto';
-import { Loan } from '../loans/schemas/loan.schema';
+import { Injectable } from "@nestjs/common";
+import { LoansService } from "../loans/loans.service";
+import { SimulateLoanClosureDto } from "./dto/simulate-loan-closure.dto";
+import { Loan } from "../loans/schemas/loan.schema";
 
 @Injectable()
 export class SimulationService {
@@ -10,19 +10,18 @@ export class SimulationService {
   async simulateClosure(dto: SimulateLoanClosureDto) {
     // 1. Fetch all ACTIVE loans
     const allLoans = await this.loansService.findAll();
-    const activeLoans = allLoans.filter((l) => l.status === 'ACTIVE');
+    const activeLoans = allLoans.filter((l) => l.status === "ACTIVE");
 
     let currentCash = dto.availableCash;
     const { bankGoldRate, retentionPercent } = dto;
 
     const steps = [];
-    let totalGoldRecovered = 0; // Purely recovered gold (not re-loaned)
-    let totalInterestSaved = 0; // Approximate future saving (simple heuristic)
+    let goldInHand = 0; // Recovered gold that is currently FREE (not re-pledged)
 
     // Deep copy for simulation state
     let loansState = activeLoans.map((l) => ({
       ...l,
-      simulatedStatus: 'ACTIVE',
+      simulatedStatus: "ACTIVE",
     }));
 
     let canProceed = true;
@@ -30,113 +29,136 @@ export class SimulationService {
     while (canProceed) {
       canProceed = false;
 
-      // Sort by highest interest cost (Principal * Rate or just Rate? Usually Rate is key, but large Principal * Rate = high bleeding)
-      // "Sort by highest interest burden" -> Usually means absolute interest outflow per day
-      // Burden = Principal * Rate
+      // Sort by highest interest burden (Principal * Rate)
       loansState.sort((a, b) => {
         const burdenA = a.principalAmount * a.annualInterestRate;
         const burdenB = b.principalAmount * b.annualInterestRate;
         return burdenB - burdenA; // Descending
       });
 
-      // Strategy: Try to close the biggest burden loan using cash + potential re-loans
-      // If we can't close the biggest, can we close the SMALLEST to free up gold?
+      // Strategy: Use Cash -> Close Biggest Burden -> Get Gold -> Re-loan ONLY if needed for NEXT Biggest
 
-      // Let's iterate and see what we can close directly
-      const closableLoanIndex = loansState.findIndex(
-        (l) =>
-          l.simulatedStatus === 'ACTIVE' && l.currentTotalDue <= currentCash,
+      // 1. Attempt to close loans with current cash (Priority: Highest Burden)
+      // Since we sorted by burden, we try to close them in order.
+      // If we can't close the biggest, logic says we might need to re-loan to get enough cash.
+      // But first, let's see if we can close *any* loan to get its gold?
+      // Actually, standard avalanche implies attacking the head.
+      // If we have 50k and top loan is 100k, we can't close it.
+      // Do we have goldInHand? If yes, re-loan it to get cash.
+      // If no, check if we can close smaller loans to get their gold?
+      // The user wants "Recycle". Usually implies closing what you CAN to generate resources for the big ones.
+
+      // Adjusted Strategy:
+      // 1. Check if we can close the TOP burden loan.
+      // 2. If yes, close it. Add gold to Hand. Loop.
+      // 3. If no, check if we currently have goldInHand.
+      //    - If yes, re-loan PARTIAL/FULL goldInHand enough to match the deficit.
+      //    - If we assume standard bank rate for new loans.
+      // 4. If no goldInHand, scan list for ANY loan we can close with currentCash to free up gold?
+      //    - If yes, close that smaller one. Add gold to Hand. Loop.
+      // 5. If nothing closes and no gold to re-loan, STOP.
+
+      // Let's implement this loop.
+
+      // Finds the highest priority loan we WANT to close (The top active one)
+      const topLoanIndex = loansState.findIndex(
+        (l) => l.simulatedStatus === "ACTIVE"
       );
 
-      if (closableLoanIndex !== -1) {
-        // ACTION: REDEEM (Close with Cash)
-        const loanToClose = loansState[closableLoanIndex];
-        currentCash -= loanToClose.currentTotalDue;
-        loanToClose.simulatedStatus = 'CLOSED';
+      if (topLoanIndex === -1) break; // All done
 
-        // Now we have free gold!
-        // Should we keep it or re-loan it?
-        // Logic: "Attempt to close next biggest loan". If we still have big loans, we might need more cash.
-        // So we Re-loan this gold immediately to get more cash to attack the big one.
+      const topLoan = loansState[topLoanIndex];
 
-        // Check if there are still active loans
-        const remainingLoans = loansState.filter(
-          (l) => l.simulatedStatus === 'ACTIVE',
-        );
-        if (remainingLoans.length > 0) {
-          // RE-LOAN Logic
-          // EffectiveGold = GoldGrams * (1 - retentionPercent / 100)
-          // NewLoanAmount = EffectiveGold * bankGoldRate
+      if (currentCash >= topLoan.currentTotalDue) {
+        // We can close the top priority loan directly!
+        currentCash -= topLoan.currentTotalDue;
+        topLoan.simulatedStatus = "CLOSED";
+        goldInHand += topLoan.goldGrams;
 
-          const effectiveGold =
-            loanToClose.goldGrams * (1 - retentionPercent / 100);
-          const newLoanAmount = effectiveGold * bankGoldRate;
-
-          // Heuristic: Only re-loan if it helps close another loan that has HIGHER interest rate than the new loan we'd be taking?
-          // Assuming new loan interest rate is standard bank rate. But we don't know the new rate.
-          // Project spec says: "Redeem smallest or highest-interest loan -> Re-loan redeemed gold -> Combine generated loan + cash -> Attempt to close next biggest loan"
-          // It implies an aggressive strategy to cycle gold to close high-interest debt.
-
-          steps.push({
-            action: 'REDEEM',
-            loanId: loanToClose._id,
-            loanName: loanToClose.loanName,
-            amountUsed: loanToClose.currentTotalDue,
-            description: `Closed loan '${loanToClose.loanName}' using cash.`,
-          });
-
-          currentCash += newLoanAmount;
-
-          steps.push({
-            action: 'RELOAN',
-            generatedFromLoanId: loanToClose._id,
-            goldGrams: loanToClose.goldGrams,
-            amountGenerated: newLoanAmount,
-            description: `Re-loaned ${loanToClose.goldGrams}g gold from '${loanToClose.loanName}' to generate ${newLoanAmount.toFixed(2)} cash.`,
-          });
-
-          canProceed = true; // We changed state (got more cash), so loop again to see if we can kill the big boss
-        } else {
-          // No more loans! We are done.
-          steps.push({
-            action: 'REDEEM',
-            loanId: loanToClose._id,
-            loanName: loanToClose.loanName,
-            amountUsed: loanToClose.currentTotalDue,
-            description: `Closed final loan '${loanToClose.loanName}'.`,
-          });
-          totalGoldRecovered += loanToClose.goldGrams;
-        }
+        steps.push({
+          action: "REDEEM",
+          loanId: topLoan._id,
+          loanName: topLoan.loanName,
+          amountUsed: topLoan.currentTotalDue,
+          goldGrams: topLoan.goldGrams,
+          description: `Closed loan '${topLoan.loanName}' using cash. recovered ${topLoan.goldGrams}g gold.`,
+        });
+        canProceed = true;
       } else {
-        // We cannot close any loan with current cash directly.
-        // Can we PARTIAL close? "Determine how fast and profitably loans can be closed using Partial cash"
-        // But typical Gold Loans don't release partial gold (usually).
-        // If we can't close ANY loan, we are stuck with this strategy unless we just save cash.
-        // Wait, "Redeem smallest...". If we can't close ANY, maybe we didn't start with enough cash.
-        // Or maybe we should close the smallest one first?
-        // We already sorted by BURDEN (Big loans first).
-        // Let's finding the smallest amount loan if we can't close the big one.
-        // Find distinct smallest loan that fits in cash
-        // Actually, my findIndex above finds the FIRST one that fits.
-        // If I sorted by Burden, the big ones are first. It skips them if cash < due.
-        // Eventually it checks small ones.
-        // If closableLoanIndex is still -1, it means currentCash < SMALLEST loan's due.
-        // STOP.
+        // We cannot close the top loan.
+        const deficit = topLoan.currentTotalDue - currentCash;
+
+        // Can we cover deficit with goldInHand?
+        // CashGenerated = PledgedGold * Rate
+        // PledgedGold = CashNeeded / Rate
+        // Effective Rate includes retention?
+        // Logic: You pledge G grams. Bank values at Rate. Keeps Retention%. gives you X.
+        // X = G * Rate * (1 - retention/100)
+        // So G_needed = X / (Rate * (1 - retention/100))
+
+        const effectiveRate = bankGoldRate * (1 - retentionPercent / 100);
+        const goldNeeded = deficit / effectiveRate;
+
+        if (goldInHand > 0) {
+          // We have some gold.
+          const goldToPledge = Math.min(goldInHand, goldNeeded);
+          const cashGenerated = goldToPledge * effectiveRate;
+
+          currentCash += cashGenerated;
+          goldInHand -= goldToPledge;
+
+          steps.push({
+            action: "RELOAN",
+            generatedFromLoanId: "POOL", // Abstract pool
+            goldGrams: goldToPledge,
+            amountGenerated: cashGenerated,
+            description: `Re-loaned ${goldToPledge.toFixed(2)}g from saved gold to generate ${cashGenerated.toFixed(2)} cash.`,
+          });
+
+          canProceed = true; // Loop to try closing topLoan again (now we have more cash)
+        } else {
+          // No gold in hand. Can we close a SMALLER loan to get gold?
+          // Find first loan (starting from index 1, since 0 is top) that fits in cash
+          const smallLoanIndex = loansState.findIndex(
+            (l) =>
+              l.simulatedStatus === "ACTIVE" && l.currentTotalDue <= currentCash
+          );
+
+          if (smallLoanIndex !== -1) {
+            const smallLoan = loansState[smallLoanIndex];
+            currentCash -= smallLoan.currentTotalDue;
+            smallLoan.simulatedStatus = "CLOSED";
+            goldInHand += smallLoan.goldGrams;
+
+            steps.push({
+              action: "REDEEM",
+              loanId: smallLoan._id,
+              loanName: smallLoan.loanName,
+              amountUsed: smallLoan.currentTotalDue,
+              goldGrams: smallLoan.goldGrams,
+              description: `Closed smaller loan '${smallLoan.loanName}' to release gold.`,
+            });
+            canProceed = true;
+          } else {
+            // Stuck. Cannot close top loan, no gold to re-loan, no smaller loan to close.
+            canProceed = false;
+          }
+        }
       }
     }
 
     const remainingLoansCount = loansState.filter(
-      (l) => l.simulatedStatus === 'ACTIVE',
+      (l) => l.simulatedStatus === "ACTIVE"
     ).length;
 
     return {
       steps,
-      totalGoldRecovered, // Only finalized recovered gold showing in hand
+      totalGoldRecovered: goldInHand, // This is exactly what user wants: "saved gold"
       remainingLoans: remainingLoansCount,
       suggestion:
         remainingLoansCount === 0
-          ? 'You can become debt free!'
-          : 'Follow these steps to reduce burden.',
+          ? "You can become debt free!"
+          : "Follow these steps to reduce burden.",
     };
   }
 }

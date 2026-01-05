@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { formatCurrency, cn } from "../utils";
 import dayjs from "dayjs";
 import { TableSkeleton } from "../components/ui/TableSkeleton";
+import { toast } from "react-hot-toast";
 
 export default function LoanList() {
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -48,8 +49,14 @@ export default function LoanList() {
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this loan?")) {
-      await api.deleteLoan(id);
-      loadLoans();
+      try {
+        await api.deleteLoan(id);
+        toast.success("Loan deleted successfully");
+        loadLoans();
+      } catch (e) {
+        toast.error("Failed to delete loan");
+        console.error(e);
+      }
     }
   };
 
